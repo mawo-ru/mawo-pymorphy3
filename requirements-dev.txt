@@ -1,0 +1,17 @@
+# Разработка и тестирование
+-r requirements.txt
+
+# Testing
+pytest>=8.4.2
+pytest-cov>=7.0.0
+
+# Code quality
+black>=25.9.0
+ruff>=0.14.3
+mypy>=1.18.2
+
+# Security
+defusedxml>=0.7.1
+
+# Console output
+rich>=14.2.0
