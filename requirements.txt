@@ -1,4 +1,5 @@
 # Основные зависимости
 dawg-python>=0.7.2
+tqdm>=4.67.1
 
 # Опциональные зависимости (для установки: pip install -r requirements-dev.txt)

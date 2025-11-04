@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from defusedxml.ElementTree import parse as defusedxml_parse
+    from defusedxml.ElementTree import parse as defusedxml_parse  # type: ignore[import-not-found]
     ET_PARSE_SAFE = True
 except ImportError:
     ET_PARSE_SAFE = False
@@ -117,15 +117,15 @@ class MAWOParse:
         normal_parses = self._analyzer.dictionary.get(self.normal_form, [])
 
         # Ищем форму с нужными граммемами
-        for parse in normal_parses:
-            if required_grammemes.issubset(parse.tag.grammemes):
-                return parse
+        for parse_item in normal_parses:
+            if required_grammemes.issubset(parse_item.tag.grammemes):
+                return parse_item  # type: ignore[no-any-return]
 
         # Если точное совпадение не найдено, ищем частичное
-        for parse in normal_parses:
-            matching_grammemes = parse.tag.grammemes & required_grammemes
+        for parse_item in normal_parses:
+            matching_grammemes = parse_item.tag.grammemes & required_grammemes
             if matching_grammemes:
-                return parse
+                return parse_item  # type: ignore[no-any-return]
 
         return None
 
@@ -295,7 +295,7 @@ class MAWOMorphAnalyzer:
 
         # Use centralized path configuration
         try:
-            from core.path_config import path_config
+            from core.path_config import path_config  # type: ignore[import-not-found]
 
             opencorpora_path = (
                 path_config.data_dir
@@ -630,7 +630,7 @@ class MAWOOptimizedMorphAnalyzer:
         return results
 
 
-def create_analyzer(dict_path: str | None = None) -> MAWOMorphAnalyzer:
+def create_analyzer(dict_path: str | None = None, use_dawg: bool = True) -> MAWOMorphAnalyzer:
     """Создает морфологический анализатор MAWO (синглтон с disk-cache).
 
     ВАЖНО: Использует pickle-кэш для мгновенной загрузки словаря OpenCorpora.
@@ -642,6 +642,7 @@ def create_analyzer(dict_path: str | None = None) -> MAWOMorphAnalyzer:
 
     Args:
         dict_path: Путь к словарю (опционально)
+        use_dawg: Использовать DAWG оптимизацию (по умолчанию True)
 
     Returns:
         Экземпляр MAWOMorphAnalyzer (синглтон в рамках процесса)
@@ -762,6 +763,7 @@ MorphAnalyzer = MAWOMorphAnalyzer
 # Основные экспорты
 __all__ = [
     "MAWOMorphAnalyzer",
+    "MAWOOptimizedMorphAnalyzer",
     "MAWOParse",
     "MAWOTag",
     "MorphAnalyzer",

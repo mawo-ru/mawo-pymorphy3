@@ -27,7 +27,7 @@ class DAWGMemoryOptimizer:
 
         # Try to import DAWG
         try:
-            import dawg
+            import dawg  # type: ignore[import-not-found]
 
             self.dawg_module = dawg
             self.dawg_available = True
@@ -74,7 +74,7 @@ class DAWGMemoryOptimizer:
 
             # Создаём DAWG с компактным хранением
             # Используем BytesDAWG для максимальной компрессии
-            dawg_dict = self.dawg_module.BytesDAWG(serialized_items)
+            dawg_dict = self.dawg_module.BytesDAWG(serialized_items)  # type: ignore[union-attr]
 
             # Статистика компрессии
             original_size_mb = self._estimate_dict_size(dictionary) / (1024 * 1024)
@@ -197,7 +197,7 @@ class DAWGMemoryOptimizer:
             with open(cache_path, "rb") as f:
                 dawg_bytes = f.read()
 
-            dawg_dict = self.dawg_module.BytesDAWG().load(dawg_bytes)
+            dawg_dict = self.dawg_module.BytesDAWG().load(dawg_bytes)  # type: ignore[union-attr]
 
             cache_size_mb = len(dawg_bytes) / (1024 * 1024)
             logger.info(f"✅ DAWG loaded from cache: {cache_size_mb:.1f} MB")
@@ -285,7 +285,7 @@ class DAWGDictionaryWrapper:
         except Exception:
             return []
 
-    def copy(self) -> dict:
+    def copy(self) -> DAWGDictionaryWrapper:
         """Создаёт copy как обычный dict (для совместимости)."""
         # Не копируем DAWG, возвращаем self
         # (DAWG immutable, копирование не требуется)
