@@ -8,12 +8,12 @@
 
 ## Возможности
 
-- **DAWG Оптимизация**: 500МБ → 50МБ (уменьшение в 10 раз, без потерь)
+- **Компактные словари DAWG**: Всего ~11МБ на диске (против 69МБ XML)
 - **Работа офлайн**: После установки не требует интернета
 - **Потокобезопасность**: Безопасно для многопоточного использования
 - **OpenCorpora 2025**: Самый свежий словарь русского языка
 - **Быстрая загрузка**: ~1-2 секунды с кэшем (против 30-60 секунд разбора XML)
-- **100% Совместимость**: Полная замена для pymorphy3
+- **100% Совместимость**: Полная замена для pymorphy2/pymorphy3
 
 ## Установка
 
@@ -100,17 +100,33 @@ else:
     manager.build_dawg_cache()
 ```
 
+### Оптимизированный анализатор с кэшированием
+
+```python
+from mawo_pymorphy3 import MAWOOptimizedMorphAnalyzer
+
+# Создаём оптимизированный анализатор (с кэшем результатов)
+analyzer = MAWOOptimizedMorphAnalyzer()
+
+# Анализируем текст целиком
+results = analyzer.analyze("Я иду домой")
+
+for result in results:
+    print(f"{result['word']} -> {result['normal_form']} ({result['pos']})")
+    print(f"  Падеж: {result['case']}, Число: {result['number']}")
+```
+
 ## Производительность
 
 ### Использование памяти
 
-| Формат словаря | Память | Время загрузки |
-|----------------|--------|----------------|
-| OpenCorpora XML | ~500МБ | 30-60 сек |
-| **DAWG (по умолчанию)** | **~50МБ** | **1-2 сек** |
-| DAWG + pickle кэш | ~50МБ | <1 сек |
+| Формат словаря | Размер на диске | Память в RAM | Время загрузки |
+|----------------|-----------------|--------------|----------------|
+| OpenCorpora XML (raw) | ~69МБ | ~500МБ | 30-60 сек |
+| **DAWG словари (включены)** | **~11МБ** | **~10-20МБ** | **<1 сек** |
+| С pickle кэшем | ~11МБ + кэш | ~10-20МБ | <1 сек |
 
-**Экономия памяти: 90%**
+**Экономия места на диске: ~84%** (11МБ против 69МБ)
 
 ### Бенчмарки
 
@@ -176,18 +192,25 @@ sha256sum -c checksums.txt
 
 Подробнее о данных, моделях и способах установки см. в [mawo-nlp-data README](https://github.com/mawo-ru/mawo-nlp-data#readme).
 
-## Миграция с pymorphy3
+## Миграция с pymorphy2/pymorphy3
 
 **100% совместимость!** Просто замените импорт:
 
 ```python
-# Было
+# Было (pymorphy2)
+from pymorphy2 import MorphAnalyzer
+analyzer = MorphAnalyzer()
+
+# Было (pymorphy3)
 from pymorphy3 import MorphAnalyzer
 analyzer = MorphAnalyzer()
 
 # Стало
 from mawo_pymorphy3 import create_analyzer
 analyzer = create_analyzer()
+# или
+from mawo_pymorphy3 import MorphAnalyzer
+analyzer = MorphAnalyzer()
 ```
 
 Все API остаются прежними. Ваш код будет работать без изменений.
