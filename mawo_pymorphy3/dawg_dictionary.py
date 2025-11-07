@@ -54,7 +54,7 @@ class DAWGDictionary:
         self._load_prediction_dawgs()
 
         logger.info(f"✅ DAWG словарь загружен из {self.dict_path}")
-        logger.info(f"   Слов: {len(list(self.words_dawg.keys()))} записей")
+        # Не вызываем keys() на DAWG - это очень медленно!
         logger.info(f"   Парадигм: {len(self.paradigms)}")
         logger.info(f"   Суффиксов: {len(self.suffixes)}")
         logger.info(f"   Граммем: {len(self.gramtab)} тегов")
