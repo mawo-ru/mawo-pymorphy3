@@ -27,6 +27,11 @@ jobs:
         python -m pip install --upgrade pip
         pip install -e ".[dev]"
 
+    - name: Verify installation
+      run: |
+        python -c "import mawo_pymorphy3; from pathlib import Path; pkg = Path(mawo_pymorphy3.__file__).parent; print(f'Package: {pkg}'); dicts = pkg / 'dicts_ru'; print(f'dicts_ru exists: {dicts.exists()}'); print(f'Files: {list(dicts.glob(\"*\")) if dicts.exists() else \"N/A\"}')"
+        python -c "import dawg; print(f'dawg-python version: {dawg.__version__}')"
+
     - name: Run tests
       run: |
         pytest tests/ -v --tb=short
