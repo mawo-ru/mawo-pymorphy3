@@ -70,7 +70,10 @@ Issues = "https://github.com/mawo-ru/mawo-pymorphy3/issues"
 Changelog = "https://github.com/mawo-ru/mawo-pymorphy3/blob/main/CHANGELOG.md"
 
 [tool.setuptools]
-packages = ["mawo_pymorphy3"]
+include-package-data = true
+
+[tool.setuptools.packages]
+find = {}  # Автоматический поиск пакетов
 
 [tool.setuptools.package-data]
 mawo_pymorphy3 = [

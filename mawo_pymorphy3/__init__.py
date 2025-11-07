@@ -183,10 +183,12 @@ class MAWOMorphAnalyzer:
                 return  # Готово, не нужен fallback
 
             except ImportError as e:
-                logger.warning(f"⚠️ dawg-python не установлен: {e}, используем fallback")
+                logger.error(f"⚠️ dawg-python не установлен: {e}, используем fallback")
+                logger.exception("Полная трассировка ImportError:")
                 self.use_dawg = False
             except Exception as e:
-                logger.warning(f"⚠️ Ошибка загрузки DAWG: {e}, используем fallback")
+                logger.error(f"⚠️ Ошибка загрузки DAWG: {e}, используем fallback")
+                logger.exception("Полная трассировка ошибки:")
                 self.use_dawg = False
 
         # Fallback: загрузка через кэш или XML
