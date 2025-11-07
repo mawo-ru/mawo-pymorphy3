@@ -43,8 +43,6 @@ classifiers = [
 dependencies = [
     "dawg-python>=0.7.2",
     "tqdm>=4.66.0",
-    "pymorphy2>=0.9.1",
-    "pymorphy2-dicts-ru>=2.4",
 ]
 
 [project.optional-dependencies]

@@ -27,7 +27,8 @@ class DAWGDictionary:
         self.grammemes: list[list[str]] = []
         self.suffixes: list[str] = []
         self.gramtab: list[list[int]] = []
-        self.paradigms: list[tuple[int, int]] = []
+        self.paradigms: list[Any] = []
+        self.paradigm_prefixes: list[str] = []
         self.words_dawg: Any = None
         self.prediction_dawgs: list[Any] = []
 
@@ -47,6 +48,7 @@ class DAWGDictionary:
         self._load_grammemes()
         self._load_suffixes()
         self._load_gramtab()
+        self._load_paradigm_prefixes()
         self._load_paradigms()
         self._load_words_dawg()
         self._load_prediction_dawgs()
@@ -94,27 +96,30 @@ class DAWGDictionary:
 
         logger.debug(f"🏷️  Загружено {len(self.gramtab)} записей gramtab")
 
+    def _load_paradigm_prefixes(self) -> None:
+        """Загрузка префиксов парадигм из meta.json."""
+        # Префиксы хранятся в compile_options.paradigm_prefixes
+        self.paradigm_prefixes = self.meta.get("compile_options", {}).get("paradigm_prefixes", [""])
+
+        logger.debug(f"🔤 Загружено {len(self.paradigm_prefixes)} префиксов парадигм")
+
     def _load_paradigms(self) -> None:
         """Загрузка парадигм из бинарного файла paradigms.array."""
+        import array
+
         paradigms_path = self.dict_path / "paradigms.array"
 
         with open(paradigms_path, "rb") as f:
-            paradigms_data = f.read()
+            paradigms_count = struct.unpack("<H", f.read(2))[0]
 
-        # Каждая форма - 2 unsigned shorts (little-endian): (suffix_id, gramtab_id)
-        paradigm_format = "<HH"  # little-endian!
-        paradigm_size = struct.calcsize(paradigm_format)
-        paradigms_count = len(paradigms_data) // paradigm_size
+            self.paradigms = []
+            for _ in range(paradigms_count):
+                paradigm_len = struct.unpack("<H", f.read(2))[0]
+                para = array.array("H")
+                para.fromfile(f, paradigm_len)
+                self.paradigms.append(para)
 
-        self.paradigms = []
-        for i in range(paradigms_count):
-            offset = i * paradigm_size
-            suffix_id, gramtab_id = struct.unpack(
-                paradigm_format, paradigms_data[offset : offset + paradigm_size]
-            )
-            self.paradigms.append((suffix_id, gramtab_id))
-
-        logger.debug(f"📦 Загружено {len(self.paradigms)} словоформ в парадигмах")
+        logger.debug(f"📦 Загружено {len(self.paradigms)} парадигм")
 
     def _load_words_dawg(self) -> None:
         """Загрузка слов из words.dawg."""
@@ -158,7 +163,7 @@ class DAWGDictionary:
 
         return self.words_dawg[word]
 
-    def get_paradigm(self, paradigm_id: int, word_idx: int) -> tuple[str, str] | None:
+    def get_paradigm(self, paradigm_id: int, word_idx: int) -> tuple[str, str, str] | None:
         """Получить информацию о парадигме.
 
         Args:
@@ -166,29 +171,39 @@ class DAWGDictionary:
             word_idx: Индекс словоформы в парадигме
 
         Returns:
-            Кортеж (suffix, tag_string) или None
+            Кортеж (suffix, tag_string, prefix) или None
             tag_string - строка вида "NOUN,anim,masc sing,nomn"
         """
-        # В pymorphy2 парадигмы хранятся последовательно в paradigms.array
-        # paradigm_id + word_idx дает позицию конкретной словоформы
-        form_index = paradigm_id + word_idx
-
-        if form_index >= len(self.paradigms):
+        if paradigm_id >= len(self.paradigms):
             return None
 
-        suffix_id, gramtab_id = self.paradigms[form_index]
+        paradigm = self.paradigms[paradigm_id]
+        paradigm_len = len(paradigm) // 3
+
+        if word_idx >= paradigm_len:
+            return None
+
+        # Извлекаем suffix_id, tag_id, prefix_id
+        suffix_id = paradigm[word_idx]
+        tag_id = paradigm[paradigm_len + word_idx]
+        prefix_id = paradigm[paradigm_len * 2 + word_idx]
 
         if suffix_id >= len(self.suffixes):
             return None
 
         suffix = self.suffixes[suffix_id]
 
-        if gramtab_id >= len(self.gramtab):
+        if tag_id >= len(self.gramtab):
             return None
 
-        tag_string = self.gramtab[gramtab_id]
+        tag_string = self.gramtab[tag_id]
 
-        return (suffix, tag_string)
+        if prefix_id >= len(self.paradigm_prefixes):
+            return None
+
+        prefix = self.paradigm_prefixes[prefix_id]
+
+        return (suffix, tag_string, prefix)
 
     def parse_tag_string(self, tag_string: str) -> tuple[str, set[str]]:
         """Разобрать строку тега на POS и граммемы.

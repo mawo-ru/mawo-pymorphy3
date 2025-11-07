@@ -153,15 +153,15 @@ class MAWOMorphAnalyzer:
         # По умолчанию используем встроенные DAWG словари из dicts_ru
         self.dict_path = dict_path or str(Path(__file__).parent / "dicts_ru")
         self.use_dawg = use_dawg
-        self._pymorphy2_analyzer: Any = None
+        self._dawg_dict: Any = None
 
-        # Используем pymorphy2 с DAWG если указано
+        # Используем собственный DAWGDictionary если указано
         if self.use_dawg and Path(self.dict_path).exists():
             try:
-                import pymorphy2
+                from .dawg_dictionary import DAWGDictionary
 
-                logger.info("⚡ Загрузка DAWG словарей через pymorphy2...")
-                self._pymorphy2_analyzer = pymorphy2.MorphAnalyzer(path=self.dict_path)
+                logger.info("⚡ Загрузка DAWG словарей...")
+                self._dawg_dict = DAWGDictionary(self.dict_path)
                 self.dictionary: dict[str, list[MAWOParse]] = {}
 
                 logger.info("✅ DAWG словари загружены успешно!")
@@ -182,8 +182,8 @@ class MAWOMorphAnalyzer:
 
                 return  # Готово, не нужен fallback
 
-            except ImportError:
-                logger.warning("⚠️ pymorphy2 не установлен, используем fallback")
+            except ImportError as e:
+                logger.warning(f"⚠️ dawg-python не установлен: {e}, используем fallback")
                 self.use_dawg = False
             except Exception as e:
                 logger.warning(f"⚠️ Ошибка загрузки DAWG: {e}, используем fallback")
@@ -593,36 +593,58 @@ class MAWOMorphAnalyzer:
 
         word_clean = word.lower().strip()
 
-        # Если используем DAWG через pymorphy2
-        if self.use_dawg and self._pymorphy2_analyzer:
+        # Если используем DAWG через DAWGDictionary
+        if self.use_dawg and self._dawg_dict:
             try:
-                pymorphy_parses = self._pymorphy2_analyzer.parse(word_clean)
+                # Получаем разборы слова из DAWG
+                word_parses = self._dawg_dict.get_word_parses(word_clean)
 
-                # Конвертируем pymorphy2 Parse в MAWOParse
                 mawo_parses = []
-                for p in pymorphy_parses:
-                    # Извлекаем POS и граммемы из pymorphy2 тега
-                    pos = str(p.tag.POS) if hasattr(p.tag, "POS") else "UNKN"
-                    grammemes = (
-                        set(str(g) for g in p.tag.grammemes)
-                        if hasattr(p.tag, "grammemes")
-                        else set()
-                    )
+                for paradigm_id, word_idx in word_parses:
+                    # Получаем информацию о парадигме
+                    paradigm_info = self._dawg_dict.get_paradigm(paradigm_id, word_idx)
+
+                    if paradigm_info is None:
+                        continue
+
+                    suffix, tag_string, prefix = paradigm_info
+
+                    # Разбираем тег
+                    pos, grammemes = self._dawg_dict.parse_tag_string(tag_string)
+
+                    # Вычисляем нормальную форму
+                    # Получаем первую форму парадигмы (word_idx=0)
+                    normal_form_info = self._dawg_dict.get_paradigm(paradigm_id, 0)
+                    if normal_form_info:
+                        normal_suffix, _, normal_prefix = normal_form_info
+                        # Извлекаем основу (stem)
+                        # Удаляем префикс и суффикс из текущего слова
+                        stem = word_clean
+                        if prefix and stem.startswith(prefix):
+                            stem = stem[len(prefix) :]
+                        if suffix and stem.endswith(suffix):
+                            stem = stem[: -len(suffix)]
+
+                        # Собираем нормальную форму
+                        normal_form = normal_prefix + stem + normal_suffix
+                    else:
+                        normal_form = word_clean
 
                     mawo_tag = MAWOTag(pos, grammemes)
                     mawo_parse = MAWOParse(
                         word=word_clean,
-                        normal_form=p.normal_form,
+                        normal_form=normal_form,
                         tag=mawo_tag,
-                        score=p.score,
+                        score=1.0,
                         analyzer=self,
                     )
                     mawo_parses.append(mawo_parse)
 
-                return mawo_parses
+                if mawo_parses:
+                    return mawo_parses
 
             except Exception as e:
-                logger.warning(f"Ошибка при разборе через pymorphy2: {e}")
+                logger.warning(f"Ошибка при разборе через DAWG: {e}")
                 # Fallback к обычному методу
 
         # Fallback: сначала ищем в словаре
