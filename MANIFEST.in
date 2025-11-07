@@ -1,0 +1,5 @@
+include README.md
+include LICENSE
+include CHANGELOG.md
+recursive-include mawo_pymorphy3/dicts_ru *.dawg *.json *.array
+include mawo_pymorphy3/py.typed

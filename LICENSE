@@ -2,6 +2,22 @@ MIT License
 
 Copyright (c) 2025 MAWO Team
 
+Этот проект является форком pymorphy3, который основан на оригинальном pymorphy2:
+
+- pymorphy2: Copyright (c) Mikhail Korobov and contributors
+  https://github.com/pymorphy2/pymorphy2
+
+- pymorphy3: Copyright (c) 2022 (продолжение pymorphy2)
+  https://github.com/no-plagiarism/pymorphy3
+  Мейнтейнеры: Danylo Halaiko, insolor и участники
+
+- OpenCorpora словари: CC BY-SA 3.0
+  http://opencorpora.org/
+
+Полная информация об авторстве и upstream-проектах доступна в файле ATTRIBUTION.md
+
+---
+
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction, including without limitation the rights

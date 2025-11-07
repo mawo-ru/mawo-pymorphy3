@@ -7,6 +7,7 @@ Based on:
 - dawg-python library
 - pymorphy2 DAWG implementation
 """
+
 from __future__ import annotations
 
 import logging
@@ -27,7 +28,7 @@ class DAWGMemoryOptimizer:
 
         # Try to import DAWG
         try:
-            import dawg  # type: ignore[import-not-found]
+            import dawg_python as dawg  # type: ignore[import-not-found]
 
             self.dawg_module = dawg
             self.dawg_available = True
@@ -41,9 +42,7 @@ class DAWGMemoryOptimizer:
         """Проверяет доступность DAWG оптимизации."""
         return self.dawg_available
 
-    def convert_dict_to_dawg(
-        self, dictionary: dict[str, list[Any]]
-    ) -> dict | Any:
+    def convert_dict_to_dawg(self, dictionary: dict[str, list[Any]]) -> dict | Any:
         """Конвертирует словарь в DAWG структуру.
 
         Args:
@@ -53,9 +52,7 @@ class DAWGMemoryOptimizer:
             DAWG structure или оригинальный словарь если DAWG недоступен
         """
         if not self.dawg_available:
-            logger.warning(
-                "⚠️ DAWG not available, using full dictionary (~500MB RAM)"
-            )
+            logger.warning("⚠️ DAWG not available, using full dictionary (~500MB RAM)")
             return dictionary
 
         try:

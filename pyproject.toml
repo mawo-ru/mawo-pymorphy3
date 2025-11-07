@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mawo-pymorphy3"
-version = "1.0.2"
+version = "1.0.3"
 description = "Улучшенный морфологический анализатор для русского языка с DAWG-оптимизацией и сокращением памяти на 90%"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.9"
 license = {text = "MIT"}
 authors = [
     {name = "MAWO Team", email = "team@mawo.ru"},
@@ -31,6 +31,7 @@ classifiers = [
     "Natural Language :: Russian",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -69,7 +70,10 @@ Issues = "https://github.com/mawo-ru/mawo-pymorphy3/issues"
 Changelog = "https://github.com/mawo-ru/mawo-pymorphy3/blob/main/CHANGELOG.md"
 
 [tool.setuptools]
-packages = ["mawo_pymorphy3"]
+include-package-data = true
+
+[tool.setuptools.packages]
+find = {}  # Автоматический поиск пакетов
 
 [tool.setuptools.package-data]
 mawo_pymorphy3 = [
@@ -79,18 +83,18 @@ mawo_pymorphy3 = [
 
 [tool.black]
 line-length = 100
-target-version = ["py310", "py311", "py312"]
+target-version = ["py39", "py310", "py311", "py312"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py39"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "B", "UP"]
 ignore = ["E501"]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.9"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false

@@ -23,7 +23,7 @@ class TestREADMEExamples:
         word = analyzer.parse("дом")[0]
         assert word.tag is not None
         assert word.normal_form is not None
-        assert hasattr(word, 'word')
+        assert hasattr(word, "word")
 
     def test_global_analyzer(self):
         """Тест: get_global_analyzer() работает"""
@@ -44,7 +44,7 @@ class TestREADMEExamples:
         word = analyzer.parse("дом")[0]
 
         # Должен иметь метод inflect
-        assert hasattr(word, 'inflect')
+        assert hasattr(word, "inflect")
         assert callable(word.inflect)
 
     def test_dictionary_manager(self):
@@ -55,9 +55,9 @@ class TestREADMEExamples:
         assert manager is not None
 
         # Проверяем методы
-        assert hasattr(manager, 'is_dawg_cache_available')
-        assert hasattr(manager, 'build_dawg_cache')
-        assert hasattr(manager, 'get_cache_info')
+        assert hasattr(manager, "is_dawg_cache_available")
+        assert hasattr(manager, "build_dawg_cache")
+        assert hasattr(manager, "get_cache_info")
 
         # Проверяем is_dawg_cache_available
         result = manager.is_dawg_cache_available()
@@ -66,8 +66,8 @@ class TestREADMEExamples:
         # Проверяем get_cache_info
         info = manager.get_cache_info()
         assert isinstance(info, dict)
-        assert 'dict_path' in info
-        assert 'dawg_available' in info
+        assert "dict_path" in info
+        assert "dawg_available" in info
 
 
 class TestCoreFunctionality:
@@ -79,8 +79,8 @@ class TestCoreFunctionality:
 
         analyzer = create_analyzer()
         assert analyzer is not None
-        assert hasattr(analyzer, 'parse')
-        assert hasattr(analyzer, 'dictionary')
+        assert hasattr(analyzer, "parse")
+        assert hasattr(analyzer, "dictionary")
 
     def test_parse_returns_list(self):
         """Тест: parse возвращает список"""
@@ -103,10 +103,10 @@ class TestCoreFunctionality:
         parse = result[0]
 
         # Проверяем обязательные атрибуты
-        assert hasattr(parse, 'word')
-        assert hasattr(parse, 'normal_form')
-        assert hasattr(parse, 'tag')
-        assert hasattr(parse, 'score')
+        assert hasattr(parse, "word")
+        assert hasattr(parse, "normal_form")
+        assert hasattr(parse, "tag")
+        assert hasattr(parse, "score")
 
     def test_tag_properties(self):
         """Тест: тег имеет все свойства"""
@@ -117,11 +117,11 @@ class TestCoreFunctionality:
         tag = result[0].tag
 
         # Проверяем обязательные свойства
-        assert hasattr(tag, 'POS')
-        assert hasattr(tag, 'grammemes')
-        assert hasattr(tag, 'case')
-        assert hasattr(tag, 'number')
-        assert hasattr(tag, 'gender')
+        assert hasattr(tag, "POS")
+        assert hasattr(tag, "grammemes")
+        assert hasattr(tag, "case")
+        assert hasattr(tag, "number")
+        assert hasattr(tag, "gender")
 
     def test_empty_string(self):
         """Тест: пустая строка возвращает пустой список"""
@@ -154,7 +154,7 @@ class TestInflection:
         analyzer = create_analyzer()
         word = analyzer.parse("дом")[0]
 
-        assert hasattr(word, 'inflect')
+        assert hasattr(word, "inflect")
 
     def test_inflect_returns_parse_or_none(self):
         """Тест: inflect возвращает MAWOParse или None"""
@@ -226,13 +226,13 @@ class TestCompability:
         import mawo_pymorphy3
 
         # Проверяем наличие всех основных экспортов
-        assert hasattr(mawo_pymorphy3, 'MAWOMorphAnalyzer')
-        assert hasattr(mawo_pymorphy3, 'MAWOParse')
-        assert hasattr(mawo_pymorphy3, 'MAWOTag')
-        assert hasattr(mawo_pymorphy3, 'MorphAnalyzer')
-        assert hasattr(mawo_pymorphy3, 'create_analyzer')
-        assert hasattr(mawo_pymorphy3, 'get_global_analyzer')
-        assert hasattr(mawo_pymorphy3, 'MAWODictionaryManager')
+        assert hasattr(mawo_pymorphy3, "MAWOMorphAnalyzer")
+        assert hasattr(mawo_pymorphy3, "MAWOParse")
+        assert hasattr(mawo_pymorphy3, "MAWOTag")
+        assert hasattr(mawo_pymorphy3, "MorphAnalyzer")
+        assert hasattr(mawo_pymorphy3, "create_analyzer")
+        assert hasattr(mawo_pymorphy3, "get_global_analyzer")
+        assert hasattr(mawo_pymorphy3, "MAWODictionaryManager")
 
 
 class TestDataFiles:
@@ -281,7 +281,7 @@ class TestRussianMorphology:
         assert len(result) > 0
         # Проверяем что есть вариант с NOUN
         tags = [str(p.tag) for p in result]
-        has_noun = any('NOUN' in tag for tag in tags)
+        has_noun = any("NOUN" in tag for tag in tags)
         assert has_noun, f"Expected NOUN in tags, got: {tags}"
 
     def test_verb_recognition(self):
@@ -293,7 +293,7 @@ class TestRussianMorphology:
 
         assert len(result) > 0
         tags = [str(p.tag) for p in result]
-        has_verb = any('VERB' in tag or 'INFN' in tag for tag in tags)
+        has_verb = any("VERB" in tag or "INFN" in tag for tag in tags)
         assert has_verb, f"Expected VERB/INFN in tags, got: {tags}"
 
     def test_case_detection(self):
@@ -309,5 +309,5 @@ class TestRussianMorphology:
         assert has_case, "Expected case to be detected"
 
 
-if __name__ == '__main__':
-    pytest.main([__file__, '-v', '--tb=short'])
+if __name__ == "__main__":
+    pytest.main([__file__, "-v", "--tb=short"])
