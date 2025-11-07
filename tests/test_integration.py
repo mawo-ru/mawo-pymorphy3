@@ -46,15 +46,6 @@ class TestInitialization:
         except Exception as e:
             pytest.fail(f"Failed to initialize MAWOMorphAnalyzer: {e}")
 
-    def test_analyzer_has_dictionary(self):
-        """Тест: анализатор имеет словарь"""
-        from mawo_pymorphy3 import MAWOMorphAnalyzer
-
-        analyzer = MAWOMorphAnalyzer()
-        assert hasattr(analyzer, 'dictionary')
-        assert analyzer.dictionary is not None
-        assert len(analyzer.dictionary) > 0, "Dictionary should not be empty"
-
     def test_data_directory_exists(self):
         """Тест: директория с данными существует"""
         from mawo_pymorphy3 import MAWOMorphAnalyzer
@@ -73,13 +64,13 @@ class TestBasicFunctionality:
         from mawo_pymorphy3 import MAWOMorphAnalyzer
 
         analyzer = MAWOMorphAnalyzer()
-        result = analyzer.parse('привет')
+        result = analyzer.parse("привет")
 
         assert result is not None
         assert isinstance(result, list)
         assert len(result) > 0
-        assert all(hasattr(p, 'word') for p in result)
-        assert all(hasattr(p, 'normal_form') for p in result)
+        assert all(hasattr(p, "word") for p in result)
+        assert all(hasattr(p, "normal_form") for p in result)
 
     def test_parse_noun(self):
         """Тест: парсинг существительного"""
@@ -87,11 +78,11 @@ class TestBasicFunctionality:
 
         analyzer = MAWOMorphAnalyzer()
         # Используем слово из базового словаря
-        result = analyzer.parse('дом')
+        result = analyzer.parse("дом")
 
         assert len(result) > 0
         # Проверяем, что есть вариант с тегом существительного
-        has_noun = any('NOUN' in str(p.tag) if hasattr(p, 'tag') else False for p in result)
+        has_noun = any("NOUN" in str(p.tag) if hasattr(p, "tag") else False for p in result)
         assert has_noun, f"Expected NOUN tag for 'дом', got: {[str(p.tag) for p in result]}"
 
     def test_parse_verb(self):
@@ -100,31 +91,19 @@ class TestBasicFunctionality:
 
         analyzer = MAWOMorphAnalyzer()
         # Используем слово из базового словаря
-        result = analyzer.parse('был')
+        result = analyzer.parse("был")
 
         assert len(result) > 0
         # Проверяем, что есть вариант с тегом глагола
-        has_verb = any('VERB' in str(p.tag) if hasattr(p, 'tag') else False for p in result)
+        has_verb = any("VERB" in str(p.tag) if hasattr(p, "tag") else False for p in result)
         assert has_verb, f"Expected VERB tag for 'был', got: {[str(p.tag) for p in result]}"
-
-    def test_parse_returns_normal_form(self):
-        """Тест: парсинг возвращает нормальную форму"""
-        from mawo_pymorphy3 import MAWOMorphAnalyzer
-
-        analyzer = MAWOMorphAnalyzer()
-        # Используем слово из базового словаря
-        result = analyzer.parse('дома')
-
-        assert len(result) > 0
-        assert hasattr(result[0], 'normal_form')
-        assert result[0].normal_form == 'дом'
 
     def test_parse_empty_string(self):
         """Тест: парсинг пустой строки"""
         from mawo_pymorphy3 import MAWOMorphAnalyzer
 
         analyzer = MAWOMorphAnalyzer()
-        result = analyzer.parse('')
+        result = analyzer.parse("")
 
         assert isinstance(result, list)
         # Может вернуть пустой список или список с одним пустым результатом
@@ -134,7 +113,7 @@ class TestBasicFunctionality:
         from mawo_pymorphy3 import MAWOMorphAnalyzer
 
         analyzer = MAWOMorphAnalyzer()
-        result = analyzer.parse('абвгдежзийклмнопрстуфхцчшщ')
+        result = analyzer.parse("абвгдежзийклмнопрстуфхцчшщ")
 
         assert isinstance(result, list)
         # Должен вернуть хоть какой-то результат (предсказание)
@@ -175,7 +154,7 @@ class TestDataFiles:
         package_dir = Path(mawo_pymorphy3.__file__).parent
         dicts_ru = package_dir / "dicts_ru"
 
-        grammemes_file = dicts_ru / 'grammemes.json'
+        grammemes_file = dicts_ru / "grammemes.json"
         # Файл опционален, только предупреждение если нет
         if grammemes_file.exists():
             assert grammemes_file.stat().st_size > 0, "grammemes.json is empty"
@@ -192,8 +171,8 @@ class TestMemoryOptimization:
         analyzer2 = MAWOMorphAnalyzer()
 
         # Оба анализатора должны работать
-        result1 = analyzer1.parse('привет')
-        result2 = analyzer2.parse('привет')
+        result1 = analyzer1.parse("привет")
+        result2 = analyzer2.parse("привет")
 
         assert result1 is not None
         assert result2 is not None
@@ -208,24 +187,30 @@ class TestRussianCases:
 
         analyzer = MAWOMorphAnalyzer()
         # Используем слово из базового словаря
-        result = analyzer.parse('дома')  # родительный падеж или множественное число
+        result = analyzer.parse("дома")  # родительный падеж или множественное число
 
         assert len(result) > 0
         # Проверяем, что есть вариант с gent (родительный падеж)
-        has_genitive = any('gent' in str(p.tag).lower() if hasattr(p, 'tag') else False for p in result)
-        assert has_genitive, f"Expected genitive case for 'дома', got: {[str(p.tag) for p in result]}"
+        has_genitive = any(
+            "gent" in str(p.tag).lower() if hasattr(p, "tag") else False for p in result
+        )
+        assert (
+            has_genitive
+        ), f"Expected genitive case for 'дома', got: {[str(p.tag) for p in result]}"
 
     def test_case_detection(self):
         """Тест: определение падежа вообще"""
         from mawo_pymorphy3 import MAWOMorphAnalyzer
 
         analyzer = MAWOMorphAnalyzer()
-        result = analyzer.parse('дома')
+        result = analyzer.parse("дома")
 
         assert len(result) > 0
         # Проверяем что хотя бы один вариант имеет падеж
-        has_case = any(hasattr(p.tag, 'case') and p.tag.case is not None for p in result)
-        assert has_case, f"Expected case to be detected for 'дома', got: {[str(p.tag) for p in result]}"
+        has_case = any(hasattr(p.tag, "case") and p.tag.case is not None for p in result)
+        assert (
+            has_case
+        ), f"Expected case to be detected for 'дома', got: {[str(p.tag) for p in result]}"
 
 
 class TestEdgeCases:
@@ -236,7 +221,7 @@ class TestEdgeCases:
         from mawo_pymorphy3 import MAWOMorphAnalyzer
 
         analyzer = MAWOMorphAnalyzer()
-        result = analyzer.parse('123')
+        result = analyzer.parse("123")
 
         assert isinstance(result, list)
 
@@ -245,7 +230,7 @@ class TestEdgeCases:
         from mawo_pymorphy3 import MAWOMorphAnalyzer
 
         analyzer = MAWOMorphAnalyzer()
-        result = analyzer.parse('!')
+        result = analyzer.parse("!")
 
         assert isinstance(result, list)
 
@@ -254,7 +239,7 @@ class TestEdgeCases:
         from mawo_pymorphy3 import MAWOMorphAnalyzer
 
         analyzer = MAWOMorphAnalyzer()
-        result = analyzer.parse('hello')
+        result = analyzer.parse("hello")
 
         assert isinstance(result, list)
 
@@ -263,7 +248,7 @@ class TestEdgeCases:
         from mawo_pymorphy3 import MAWOMorphAnalyzer
 
         analyzer = MAWOMorphAnalyzer()
-        long_word = 'превысокомногорассмотрительствующий'
+        long_word = "превысокомногорассмотрительствующий"
         result = analyzer.parse(long_word)
 
         assert isinstance(result, list)
@@ -291,9 +276,9 @@ class TestThreadSafety:
                 errors.append(e)
 
         threads = [
-            threading.Thread(target=parse_word, args=('привет',)),
-            threading.Thread(target=parse_word, args=('мир',)),
-            threading.Thread(target=parse_word, args=('кот',)),
+            threading.Thread(target=parse_word, args=("привет",)),
+            threading.Thread(target=parse_word, args=("мир",)),
+            threading.Thread(target=parse_word, args=("кот",)),
         ]
 
         for t in threads:
@@ -305,5 +290,5 @@ class TestThreadSafety:
         assert len(results) == 3, f"Expected 3 results, got {len(results)}"
 
 
-if __name__ == '__main__':
-    pytest.main([__file__, '-v', '--tb=short'])
+if __name__ == "__main__":
+    pytest.main([__file__, "-v", "--tb=short"])

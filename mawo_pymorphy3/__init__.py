@@ -1,6 +1,7 @@
 """MAWO морфологический анализатор
 Использует улучшенный словарь OpenCorpora и современные алгоритмы.
 """
+
 from __future__ import annotations
 
 import logging
@@ -10,6 +11,7 @@ from typing import Any
 
 try:
     from defusedxml.ElementTree import parse as defusedxml_parse  # type: ignore[import-not-found]
+
     ET_PARSE_SAFE = True
 except ImportError:
     ET_PARSE_SAFE = False
@@ -92,7 +94,14 @@ class MAWOTag:
 class MAWOParse:
     """Результат морфологического анализа."""
 
-    def __init__(self, word: str, normal_form: str, tag: MAWOTag, score: float = 1.0, analyzer: Any | None = None) -> None:
+    def __init__(
+        self,
+        word: str,
+        normal_form: str,
+        tag: MAWOTag,
+        score: float = 1.0,
+        analyzer: Any | None = None,
+    ) -> None:
         self.word = word
         self.normal_form = normal_form
         self.tag = tag
@@ -108,7 +117,7 @@ class MAWOParse:
         Returns:
             MAWOParse с нужными граммемами или None если не найдено
         """
-        if not self._analyzer or not hasattr(self._analyzer, 'dictionary'):
+        if not self._analyzer or not hasattr(self._analyzer, "dictionary"):
             # Простая заглушка если анализатор недоступен
             logger.warning("Analyzer not available for inflection, returning None")
             return None
@@ -138,14 +147,51 @@ class MAWOMorphAnalyzer:
     Полная замена pymorphy2 с улучшенным словарем OpenCorpora.
     """
 
-    def __init__(self, dict_path: str | None = None) -> None:
+    def __init__(self, dict_path: str | None = None, use_dawg: bool = True) -> None:
         global _GLOBAL_DICTIONARY_CACHE, _GLOBAL_PATTERNS_CACHE
 
-        self.dict_path = dict_path or str(Path(__file__).parent / "data")
+        # По умолчанию используем встроенные DAWG словари из dicts_ru
+        self.dict_path = dict_path or str(Path(__file__).parent / "dicts_ru")
+        self.use_dawg = use_dawg
+        self._pymorphy2_analyzer: Any = None
 
-        # Используем глобальный кэш для предотвращения множественной загрузки
+        # Используем pymorphy2 с DAWG если указано
+        if self.use_dawg and Path(self.dict_path).exists():
+            try:
+                import pymorphy2
+
+                logger.info("⚡ Загрузка DAWG словарей через pymorphy2...")
+                self._pymorphy2_analyzer = pymorphy2.MorphAnalyzer(path=self.dict_path)
+                self.dictionary: dict[str, list[MAWOParse]] = {}
+
+                logger.info("✅ DAWG словари загружены успешно!")
+                logger.info(f"   Путь к словарям: {self.dict_path}")
+                logger.info("   Память: ~15-20 МБ (DAWG)")
+
+                # Инициализируем patterns для fallback на неизвестные слова
+                self.patterns: dict[str, Any] = {}
+                self._init_patterns()
+
+                # Для совместимости с тестами
+                self._analyzer = self
+                self._production_analyzer = None
+
+                logger.info(
+                    "✅ MAWO Morphological Analyzer initialized with DAWG dictionaries",
+                )
+
+                return  # Готово, не нужен fallback
+
+            except ImportError:
+                logger.warning("⚠️ pymorphy2 не установлен, используем fallback")
+                self.use_dawg = False
+            except Exception as e:
+                logger.warning(f"⚠️ Ошибка загрузки DAWG: {e}, используем fallback")
+                self.use_dawg = False
+
+        # Fallback: загрузка через кэш или XML
         if _GLOBAL_DICTIONARY_CACHE is None:
-            logger.info("🔄 First time initialization - loading OpenCorpora dictionary...")
+            logger.info("🔄 Инициализация (fallback режим) - загрузка словаря...")
 
             # Показываем красивый заголовок ТОЛЬКО при реальной загрузке
             if RICH_AVAILABLE:
@@ -165,7 +211,7 @@ class MAWOMorphAnalyzer:
                 f"💾 OpenCorpora dictionary cached ({len(_GLOBAL_DICTIONARY_CACHE)} entries)",
             )
         else:
-            logger.debug("⚡ Using cached OpenCorpora dictionary - no reload needed!") # type: ignore[unreachable]
+            logger.debug("⚡ Using cached OpenCorpora dictionary - no reload needed!")  # type: ignore[unreachable]
             self.dictionary = _GLOBAL_DICTIONARY_CACHE.copy()
 
         if _GLOBAL_PATTERNS_CACHE is None:
@@ -173,7 +219,7 @@ class MAWOMorphAnalyzer:
             self._init_patterns()
             _GLOBAL_PATTERNS_CACHE = self.patterns.copy()
         else:
-            self.patterns = _GLOBAL_PATTERNS_CACHE.copy() # type: ignore[unreachable]
+            self.patterns = _GLOBAL_PATTERNS_CACHE.copy()  # type: ignore[unreachable]
 
         # Для совместимости с тестами
         self._analyzer = self
@@ -386,9 +432,24 @@ class MAWOMorphAnalyzer:
                         gram_value = gram.get("v")
                         if gram_value:
                             if pos == "UNKN" and gram_value in {
-                                "NOUN", "VERB", "ADJF", "ADJS", "COMP", "INFN",
-                                "PRTF", "PRTS", "GRND", "NUMR", "ADVB", "NPRO",
-                                "PRED", "PREP", "CONJ", "PRCL", "INTJ", "PNCT",
+                                "NOUN",
+                                "VERB",
+                                "ADJF",
+                                "ADJS",
+                                "COMP",
+                                "INFN",
+                                "PRTF",
+                                "PRTS",
+                                "GRND",
+                                "NUMR",
+                                "ADVB",
+                                "NPRO",
+                                "PRED",
+                                "PREP",
+                                "CONJ",
+                                "PRCL",
+                                "INTJ",
+                                "PNCT",
                             }:
                                 pos = gram_value
                             else:
@@ -408,6 +469,7 @@ class MAWOMorphAnalyzer:
                 tree = defusedxml_parse(xml_path)
             else:
                 import xml.etree.ElementTree as ET  # noqa: N817
+
                 tree = ET.parse(xml_path)  # nosec B314
             root = tree.getroot()
 
@@ -531,7 +593,39 @@ class MAWOMorphAnalyzer:
 
         word_clean = word.lower().strip()
 
-        # Сначала ищем в словаре
+        # Если используем DAWG через pymorphy2
+        if self.use_dawg and self._pymorphy2_analyzer:
+            try:
+                pymorphy_parses = self._pymorphy2_analyzer.parse(word_clean)
+
+                # Конвертируем pymorphy2 Parse в MAWOParse
+                mawo_parses = []
+                for p in pymorphy_parses:
+                    # Извлекаем POS и граммемы из pymorphy2 тега
+                    pos = str(p.tag.POS) if hasattr(p.tag, "POS") else "UNKN"
+                    grammemes = (
+                        set(str(g) for g in p.tag.grammemes)
+                        if hasattr(p.tag, "grammemes")
+                        else set()
+                    )
+
+                    mawo_tag = MAWOTag(pos, grammemes)
+                    mawo_parse = MAWOParse(
+                        word=word_clean,
+                        normal_form=p.normal_form,
+                        tag=mawo_tag,
+                        score=p.score,
+                        analyzer=self,
+                    )
+                    mawo_parses.append(mawo_parse)
+
+                return mawo_parses
+
+            except Exception as e:
+                logger.warning(f"Ошибка при разборе через pymorphy2: {e}")
+                # Fallback к обычному методу
+
+        # Fallback: сначала ищем в словаре
         if word_clean in self.dictionary:
             # Добавляем ссылку на анализатор для inflect()
             parses = self.dictionary[word_clean]
@@ -631,17 +725,15 @@ class MAWOOptimizedMorphAnalyzer:
 
 
 def create_analyzer(dict_path: str | None = None, use_dawg: bool = True) -> MAWOMorphAnalyzer:
-    """Создает морфологический анализатор MAWO (синглтон с disk-cache).
+    """Создает морфологический анализатор MAWO (синглтон).
 
-    ВАЖНО: Использует pickle-кэш для мгновенной загрузки словаря OpenCorpora.
-    - Первый запуск: парсит XML (~30-60с) + создает кэш
-    - Последующие запуски: загружает из кэша (~1-2с)
-    - Multiprocessing-safe: каждый процесс быстро загружает из общего кэша
-
-    Thread-safe реализация с double-checked locking паттерном.
+    ВАЖНО: Использует DAWG словари для быстрой загрузки и малого потребления памяти.
+    - Загрузка: ~1-2 секунды
+    - Память: ~15-20 МБ (вместо ~500 МБ)
+    - Thread-safe реализация с double-checked locking
 
     Args:
-        dict_path: Путь к словарю (опционально)
+        dict_path: Путь к словарю (опционально, по умолчанию dicts_ru/)
         use_dawg: Использовать DAWG оптимизацию (по умолчанию True)
 
     Returns:
@@ -652,7 +744,7 @@ def create_analyzer(dict_path: str | None = None, use_dawg: bool = True) -> MAWO
 
     # Быстрая проверка без блокировки
     if _GLOBAL_ANALYZER_INSTANCE is not None:
-        logger.debug("⚡ Returning existing singleton analyzer instance (fast path)") # type: ignore[unreachable]
+        logger.debug("⚡ Returning existing singleton analyzer instance (fast path)")  # type: ignore[unreachable]
         return _GLOBAL_ANALYZER_INSTANCE
 
     # Медленный путь с блокировкой
@@ -661,13 +753,13 @@ def create_analyzer(dict_path: str | None = None, use_dawg: bool = True) -> MAWO
             # Double-checked locking: проверяем снова внутри блокировки
             if _GLOBAL_ANALYZER_INSTANCE is None:
                 logger.info("🔄 Creating new singleton analyzer instance (thread-safe)")
-                _GLOBAL_ANALYZER_INSTANCE = MAWOMorphAnalyzer(dict_path)
+                _GLOBAL_ANALYZER_INSTANCE = MAWOMorphAnalyzer(dict_path, use_dawg=use_dawg)
             else:
-                logger.debug("⚡ Another thread created instance, using it") # type: ignore[unreachable]
+                logger.debug("⚡ Another thread created instance, using it")  # type: ignore[unreachable]
     # PRODUCTION REQUIRED без threading (fallback для старых систем)
     elif _GLOBAL_ANALYZER_INSTANCE is None:
         logger.info("🔄 Creating new singleton analyzer instance (no threading)")
-        _GLOBAL_ANALYZER_INSTANCE = MAWOMorphAnalyzer(dict_path)
+        _GLOBAL_ANALYZER_INSTANCE = MAWOMorphAnalyzer(dict_path, use_dawg=use_dawg)
 
     return _GLOBAL_ANALYZER_INSTANCE
 
