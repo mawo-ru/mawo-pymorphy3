@@ -34,7 +34,7 @@ class DAWGDictionary:
 
         # Проверяем доступность библиотеки DAWG
         try:
-            import dawg  # type: ignore[import-not-found]
+            import dawg_python as dawg  # type: ignore[import-not-found]
 
             self._dawg_module = dawg
             self._dawg_available = True

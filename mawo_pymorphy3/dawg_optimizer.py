@@ -28,7 +28,7 @@ class DAWGMemoryOptimizer:
 
         # Try to import DAWG
         try:
-            import dawg  # type: ignore[import-not-found]
+            import dawg_python as dawg  # type: ignore[import-not-found]
 
             self.dawg_module = dawg
             self.dawg_available = True
