@@ -979,29 +979,50 @@ class MAWOMorphAnalyzer:
         # Пытаемся сначала с исходным словом
         result = self._parse_word(word_clean)
 
-        # Если не найдено (UNKN, пусто или предсказание) и слово содержит 'е' или 'ё', пробуем с заменой (е/ё нормализация)
-        # Предсказанные слова имеют score < 1.0
-        is_unknown = (
-            not result
-            or (len(result) == 1 and result[0].tag.POS == "UNKN")
-            or (len(result) == 1 and result[0].score < 1.0)
-        )
-        if is_unknown and ("е" in word_clean or "ё" in word_clean):
+        # Е/Ё нормализация (best practice NLP 2024-2025):
+        # Для оптимизации производительности, пробуем альтернативное написание только если:
+        # 1. Есть е или ё в слове
+        # 2. И хотя бы одно из условий:
+        #    - Нет результата вообще
+        #    - Результат UNKN
+        #    - Результат предсказанный (score < 1.0)
+        #    - Результат не NOUN/VERB/ADJF (низкоприоритетный POS)
+
+        should_try_normalization = False
+        if "е" in word_clean or "ё" in word_clean:
+            if not result:
+                should_try_normalization = True
+            else:
+                # Проверяем качество первого результата
+                first = result[0]
+                high_priority_pos = {"NOUN", "VERB", "INFN", "ADJF"}
+                if (first.tag.POS == "UNKN" or
+                    first.score < 1.0 or
+                    first.tag.POS not in high_priority_pos):
+                    should_try_normalization = True
+
+        if should_try_normalization:
             # Заменяем е ↔ ё
             word_normalized = word_clean.replace("е", "\x00").replace("ё", "е").replace("\x00", "ё")
             result_normalized = self._parse_word(word_normalized)
 
-            # Если нашли результат и он лучше чем UNKN, используем его
-            if result_normalized and not (
-                len(result_normalized) == 1 and result_normalized[0].tag.POS == "UNKN"
-            ):
-                result = result_normalized
-                # Восстанавливаем исходное написание в word
-                for parse in result:
+            if result_normalized:
+                # Восстанавливаем оригинальное написание
+                for parse in result_normalized:
                     parse.word = word_clean
 
+                # Объединяем результаты, удаляя дубликаты
+                seen = set()
+                combined = []
+                for parse in result + result_normalized:
+                    key = (parse.normal_form, str(parse.tag))
+                    if key not in seen:
+                        seen.add(key)
+                        combined.append(parse)
+                result = combined
+
         # Применяем эвристику для сортировки разборов (лучшие первыми)
-        # Основано на: Turkish Morphological Disambiguation (LongestRootFirst, RootWordStatistics)
+        # Приоритет: словарные > POS (NOUN > VERB > ADJF) > nominative > меньше граммем
         if result and len(result) > 1:
             result = self._rank_parses(result)
 
@@ -1010,11 +1031,11 @@ class MAWOMorphAnalyzer:
     def _rank_parses(self, parses: list[MAWOParse]) -> list[MAWOParse]:
         """Ранжировать разборы по эвристикам (лучшие первыми).
 
-        Эвристики (в порядке приоритета):
-        1. Часть речи: NOUN > VERB > ADJF > остальные (основные POS предпочтительнее)
-        2. Именительный падеж (nomn) предпочтительнее косвенных
-        3. Меньше граммем = проще форма = вероятнее
-        4. Выше score (из словаря vs предсказанные)
+        Эвристики (в порядке приоритета - по best practices NLP 2024-2025):
+        1. Словарные слова (score >= 1.0) ВСЕГДА лучше предсказанных (score < 1.0)
+        2. Среди словарных: Часть речи: NOUN > VERB > ADJF > остальные
+        3. Именительный падеж (nomn) предпочтительнее косвенных
+        4. Меньше граммем = проще форма = вероятнее
 
         Args:
             parses: Список разборов
@@ -1023,34 +1044,36 @@ class MAWOMorphAnalyzer:
             Отсортированный список разборов
         """
 
-        def parse_rank(p: MAWOParse) -> tuple[int, int, int, float]:
-            # Приоритет 1: POS (основные части речи предпочтительнее)
+        def parse_rank(p: MAWOParse) -> tuple[int, int, int, int]:
+            # Приоритет 0: словарные слова vs предсказанные
+            # Это КРИТИЧНО: словарные ВСЕГДА лучше предсказанных
+            is_predicted = 1 if p.score < 1.0 else 0
+
+            # Приоритет 1: POS (только среди словарных или среди предсказанных)
+            # Основано на частотности частей речи в русском языке
             pos_priority = {
-                "NOUN": 0,  # Существительные - высший приоритет
+                "NOUN": 0,  # Существительные - самый частый класс
                 "VERB": 1,  # Глаголы
-                "INFN": 1,  # Инфинитивы
-                "ADJF": 2,  # Полные прилагательные
-                "ADJS": 3,  # Краткие прилагательные
-                "PRTF": 3,  # Причастия
-                "PRTS": 4,  # Краткие причастия
-                "GRND": 4,  # Деепричастия
+                "INFN": 1,  # Инфинитивы (тоже глаголы)
+                "ADJF": 2,  # Прилагательные полные
                 "NUMR": 2,  # Числительные
-                "ADVB": 3,  # Наречия
                 "NPRO": 2,  # Местоимения-существительные
+                "ADJS": 3,  # Прилагательные краткие
+                "ADVB": 3,  # Наречия
+                "PRTF": 3,  # Причастия полные
+                "PRTS": 4,  # Причастия краткие
+                "GRND": 4,  # Деепричастия
                 "PRED": 4,  # Предикативы
             }
-            pos_rank = pos_priority.get(p.tag.POS, 10)  # Остальные - низкий приоритет
+            pos_rank = pos_priority.get(p.tag.POS, 10)
 
-            # Приоритет 2: nominative case (меньше = лучше)
+            # Приоритет 2: nominative case (именительный падеж чаще встречается)
             nomn_penalty = 0 if "nomn" in p.tag.grammemes else 1
 
-            # Приоритет 3: меньше граммем (меньше = лучше)
+            # Приоритет 3: меньше граммем = проще форма
             grammemes_count = len(p.tag.grammemes)
 
-            # Приоритет 4: score (больше = лучше, поэтому инвертируем)
-            score_rank = -p.score
-
-            return (pos_rank, nomn_penalty, grammemes_count, score_rank)
+            return (is_predicted, pos_rank, nomn_penalty, grammemes_count)
 
         return sorted(parses, key=parse_rank)
 
@@ -1109,6 +1132,54 @@ class MAWOMorphAnalyzer:
 
     def _parse_word_base(self, word_clean: str) -> list[MAWOParse]:
         """Базовый парсинг слова без обработки частиц."""
+
+        # ========== SPECIAL ANALYZERS (Best Practice NLP 2024-2025) ==========
+        # Обрабатываем специальные токены ДО морфологического анализа
+        # Подход основан на spaCy tokenizer special cases
+
+        # 1. PunctuationAnalyzer - знаки пунктуации
+        if self._is_punctuation(word_clean):
+            return [
+                MAWOParse(
+                    word=word_clean,
+                    normal_form=word_clean,
+                    tag=MAWOTag("PNCT", set()),
+                    score=1.0,
+                    analyzer=self,
+                )
+            ]
+
+        # 2. NumberAnalyzer - числа
+        number_result = self._analyze_number(word_clean)
+        if number_result:
+            return number_result
+
+        # 3. RomanNumeralAnalyzer - римские цифры
+        # 4. LatinAnalyzer - латинский текст (не содержит кириллицу)
+        # Некоторые токены могут быть и римскими цифрами, и латинским текстом
+        # (например, "I", "V", "X", "L", "C", "D", "M")
+        special_results = []
+
+        roman_result = self._analyze_roman(word_clean)
+        if roman_result:
+            special_results.extend(roman_result)
+
+        if self._is_latin(word_clean):
+            # Добавляем LATN вариант
+            special_results.append(
+                MAWOParse(
+                    word=word_clean,
+                    normal_form=word_clean.lower(),
+                    tag=MAWOTag("LATN", set()),
+                    score=1.0,
+                    analyzer=self,
+                )
+            )
+
+        if special_results:
+            return special_results
+
+        # ========== MORPHOLOGICAL ANALYSIS ==========
         # Если используем DAWG через DAWGDictionary
         if self.use_dawg and self._dawg_dict:
             try:
@@ -1309,6 +1380,125 @@ class MAWOMorphAnalyzer:
             results.append(MAWOParse(word, word, tag, 0.1, self))
 
         return results
+
+    # ========== SPECIAL ANALYZERS HELPER METHODS ==========
+
+    def _is_punctuation(self, word: str) -> bool:
+        """Проверка является ли токен пунктуацией."""
+        import string
+
+        # Расширенная пунктуация (включая Unicode)
+        punct_chars = set(string.punctuation + "…—–")
+        return all(c in punct_chars for c in word) and len(word) > 0
+
+    def _analyze_number(self, word: str) -> list[MAWOParse] | None:
+        """Анализ числовых токенов."""
+        import re
+
+        # Integer: 123, 0
+        if re.match(r"^\d+$", word):
+            return [
+                MAWOParse(
+                    word=word,
+                    normal_form=word,
+                    tag=MAWOTag("NUMB", {"intg"}),
+                    score=1.0,
+                    analyzer=self,
+                )
+            ]
+
+        # Real number: 123.1 or 123,1
+        if re.match(r"^\d+[.,]\d+$", word):
+            return [
+                MAWOParse(
+                    word=word,
+                    normal_form=word,
+                    tag=MAWOTag("NUMB", {"real"}),
+                    score=1.0,
+                    analyzer=self,
+                )
+            ]
+
+        return None
+
+    def _analyze_roman(self, word: str) -> list[MAWOParse] | None:
+        """Анализ римских цифр."""
+        import re
+
+        # Римские цифры: I, V, X, L, C, D, M (case insensitive)
+        if re.match(r"^[IVXLCDM]+$", word.upper()) and len(word) > 0:
+            # Проверяем что это действительно похоже на римскую цифру
+            # (не просто случайная комбинация букв)
+            upper_word = word.upper()
+            # Базовая проверка валидности римской цифры
+            if self._is_valid_roman(upper_word):
+                return [
+                    MAWOParse(
+                        word=word,
+                        normal_form=word.lower(),
+                        tag=MAWOTag("ROMN", set()),
+                        score=1.0,
+                        analyzer=self,
+                    )
+                ]
+
+        return None
+
+    def _is_valid_roman(self, word: str) -> bool:
+        """Проверка валидности римской цифры."""
+        # Простая эвристика: римские цифры обычно содержат I, V, X
+        # и не содержат более 3 одинаковых символов подряд (кроме M)
+        valid_chars = set("IVXLCDM")
+        if not set(word).issubset(valid_chars):
+            return False
+
+        # Проверяем на повторы (не более 3-4 подряд)
+        for char in "IVXLCD":
+            if char * 4 in word:
+                return False
+
+        return True
+
+    def _is_latin(self, word: str) -> bool:
+        """Проверка является ли текст латинским (не кириллица)."""
+        # Латинский текст - содержит хотя бы одну латинскую букву
+        has_latin = any("a" <= c.lower() <= "z" for c in word)
+        has_cyrillic = any("а" <= c.lower() <= "я" or c.lower() == "ё" for c in word)
+
+        if "-" in word and has_latin and has_cyrillic:
+            # Compound word с латиницей и кириллицей
+            # Примеры:
+            # - "Ретро-FM" → LATN (FM - неизменяемая аббревиатура)
+            # - "pdf-документов" → NOUN (документов - склоняется)
+
+            parts = word.split("-")
+            latin_parts = []
+            cyrillic_parts = []
+
+            for part in parts:
+                part_has_latin = any("a" <= c.lower() <= "z" for c in part)
+                part_has_cyrillic = any("а" <= c.lower() <= "я" or c.lower() == "ё" for c in part)
+
+                if part_has_latin:
+                    latin_parts.append(part)
+                if part_has_cyrillic:
+                    cyrillic_parts.append(part)
+
+            # Проверяем выглядит ли кириллическая часть как склоняемое слово
+            # Если да → compound word → не LATN
+            # Если нет → скорее LATN
+            inflection_endings = ["ов", "ам", "ами", "ах", "ями", "ях", "ей", "ой", "ую", "ом"]
+            for cyrillic_part in cyrillic_parts:
+                for ending in inflection_endings:
+                    if cyrillic_part.endswith(ending) and len(cyrillic_part) > len(ending) + 2:
+                        # Кириллическая часть склоняется → compound word → не LATN
+                        return False
+
+            # Если кириллическая часть не склоняется и есть латиница → LATN
+            return True
+        else:
+            # Обычное слово - латиница только если НЕТ кириллицы
+            return has_latin and not has_cyrillic
 
 
 class MAWOOptimizedMorphAnalyzer:
