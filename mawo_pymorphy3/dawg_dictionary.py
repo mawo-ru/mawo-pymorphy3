@@ -235,5 +235,28 @@ class DAWGDictionary:
         """
         return word in self.words_dawg
 
+    def get_all_paradigm_forms(self, paradigm_id: int) -> list[tuple[str, str, str]]:
+        """Получить все формы парадигмы (лексему).
+
+        Args:
+            paradigm_id: ID парадигмы
+
+        Returns:
+            Список кортежей (suffix, tag_string, prefix) для всех форм
+        """
+        if paradigm_id >= len(self.paradigms):
+            return []
+
+        paradigm = self.paradigms[paradigm_id]
+        paradigm_len = len(paradigm) // 3
+
+        forms = []
+        for word_idx in range(paradigm_len):
+            form_info = self.get_paradigm(paradigm_id, word_idx)
+            if form_info:
+                forms.append(form_info)
+
+        return forms
+
 
 __all__ = ["DAWGDictionary"]

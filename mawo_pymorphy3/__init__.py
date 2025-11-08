@@ -53,9 +53,28 @@ except ImportError:
 class MAWOTag:
     """Морфологический тег в формате MAWO."""
 
+    # Mapping редких падежей на обычные (как в pymorphy2)
+    RARE_CASES = {
+        "gen1": "gent",
+        "gen2": "gent",
+        "acc1": "accs",
+        "acc2": "accs",
+        "loc1": "loct",
+        "loc2": "loct",
+        "voct": "nomn",
+    }
+
     def __init__(self, pos: str = "UNKN", grammemes: set[str] | None = None) -> None:
         self.POS = pos
         self.grammemes = grammemes or set()
+
+    @classmethod
+    def fix_rare_cases(cls, grammemes: set[str]) -> set[str]:
+        """
+        Replace rare cases (loc2/voct/...) with common ones (loct/nomn/...).
+        Как в pymorphy2.
+        """
+        return {cls.RARE_CASES.get(g, g) for g in grammemes}
 
     @property
     def case(self) -> str | None:
@@ -90,6 +109,16 @@ class MAWOTag:
             return str(self.POS)
         return f"{self.POS} {','.join(sorted(self.grammemes))}"
 
+    def __eq__(self, other: Any) -> bool:
+        """Проверка равенства тегов."""
+        if not isinstance(other, MAWOTag):
+            return False
+        return self.POS == other.POS and self.grammemes == other.grammemes
+
+    def __hash__(self) -> int:
+        """Хеш тега для использования в set/dict."""
+        return hash((self.POS, frozenset(self.grammemes)))
+
 
 class MAWOParse:
     """Результат морфологического анализа."""
@@ -101,15 +130,24 @@ class MAWOParse:
         tag: MAWOTag,
         score: float = 1.0,
         analyzer: Any | None = None,
+        paradigm_id: int | None = None,
+        stem: str | None = None,
     ) -> None:
         self.word = word
         self.normal_form = normal_form
         self.tag = tag
         self.score = score
         self._analyzer = analyzer
+        self._paradigm_id = paradigm_id
+        self._stem = stem
 
     def inflect(self, required_grammemes: set[str]) -> MAWOParse | None:
         """Получение словоформы с заданными грамматическими признаками.
+
+        Алгоритм как в pymorphy2:
+        1. Получить лексему (все формы слова)
+        2. Найти формы, содержащие требуемые граммемы
+        3. Выбрать наиболее похожую форму
 
         Args:
             required_grammemes: Множество требуемых граммем (например, {"sing", "femn"})
@@ -117,26 +155,369 @@ class MAWOParse:
         Returns:
             MAWOParse с нужными граммемами или None если не найдено
         """
-        if not self._analyzer or not hasattr(self._analyzer, "dictionary"):
-            # Простая заглушка если анализатор недоступен
-            logger.warning("Analyzer not available for inflection, returning None")
+        if not self._analyzer:
+            logger.warning("Analyzer not available for inflection")
             return None
 
-        # Ищем формы нормальной формы слова
-        normal_parses = self._analyzer.dictionary.get(self.normal_form, [])
+        # Получаем лексему (все формы слова)
+        lexeme = self.lexeme
 
-        # Ищем форму с нужными граммемами
-        for parse_item in normal_parses:
-            if required_grammemes.issubset(parse_item.tag.grammemes):
-                return parse_item  # type: ignore[no-any-return]
+        # Ищем формы, содержащие требуемые граммемы (сначала с исходными редкими падежами)
+        possible_results = []
+        for form in lexeme:
+            form_tags = form.tag.grammemes | {form.tag.POS}
+            if required_grammemes.issubset(form_tags):
+                possible_results.append(form)
 
-        # Если точное совпадение не найдено, ищем частичное
-        for parse_item in normal_parses:
-            matching_grammemes = parse_item.tag.grammemes & required_grammemes
-            if matching_grammemes:
-                return parse_item  # type: ignore[no-any-return]
+        # Если ничего не найдено с редкими падежами, пробуем нормализовать
+        if not possible_results:
+            normalized_grammemes = MAWOTag.fix_rare_cases(required_grammemes)
+            # Если нормализация что-то изменила, пробуем еще раз
+            if normalized_grammemes != required_grammemes:
+                for form in lexeme:
+                    form_tags = form.tag.grammemes | {form.tag.POS}
+                    if normalized_grammemes.issubset(form_tags):
+                        possible_results.append(form)
+
+        # Если ничего не найдено, возвращаем None
+        if not possible_results:
+            return None
+
+        # Если найдена одна форма, возвращаем ее
+        if len(possible_results) == 1:
+            return possible_results[0]
+
+        # Если несколько форм, выбираем наиболее похожую
+        # Логика similarity из pymorphy2:
+        # similarity = len(common_grammemes) - 0.1 * len(symmetric_difference)
+        source_grammemes = self.tag.grammemes | {self.tag.POS}
+
+        def similarity(form: MAWOParse) -> float:
+            form_grammemes = form.tag.grammemes | {form.tag.POS}
+            common = source_grammemes & form_grammemes
+            diff = source_grammemes ^ form_grammemes
+            return len(common) - 0.1 * len(diff)
+
+        # Возвращаем форму с максимальной similarity
+        return max(possible_results, key=similarity)
+
+    def _inflect_legacy(self, required_grammemes: set[str]) -> MAWOParse | None:
+        """Старый метод inflect (оставлен для справки).
+
+        Использовался до реализации lexeme-based подхода.
+        """
+        if not self._analyzer:
+            logger.warning("Analyzer not available for inflection")
+            return None
+
+        # Если используется DAWG и есть paradigm_id
+        if (
+            hasattr(self._analyzer, "_dawg_dict")
+            and self._analyzer._dawg_dict
+            and self._paradigm_id is not None
+            and self._stem is not None
+        ):
+            # Получаем все формы парадигмы
+            paradigm_forms = self._analyzer._dawg_dict.get_all_paradigm_forms(self._paradigm_id)
+
+            # Группируем граммемы по категориям
+            def get_grammeme_groups():
+                return {
+                    "number": {"sing", "plur"},
+                    "tense": {"past", "pres", "futr"},
+                    "gender": {"masc", "femn", "neut"},
+                    "case": {
+                        "nomn",
+                        "gent",
+                        "datv",
+                        "accs",
+                        "ablt",
+                        "loct",
+                        "voct",
+                        "gen2",
+                        "acc2",
+                        "loc2",
+                    },
+                    "person": {"1per", "2per", "3per"},
+                    "aspect": {"perf", "impf"},
+                    "voice": {"actv", "pssv"},
+                    "animacy": {"anim", "inan"},
+                }
+
+            # Определяем, какие граммемы из исходного слова нужно сохранить
+            source_grammemes_to_preserve = set()
+            grammeme_groups = get_grammeme_groups()
+
+            # Для некоторых частей речи не нужно сохранять определенные граммемы
+            # GRND (деепричастие) - не имеет рода, числа, лица, падежа (но ИМЕЕТ время: past/pres)
+            # INFN (инфинитив) - не имеет времени, рода, числа, лица, падежа
+            # COMP (сравнительная степень) - не имеет рода, числа, падежа
+            pos_incompatible_groups = {
+                "GRND": {"gender", "number", "person", "case"},
+                "INFN": {"tense", "gender", "number", "person", "case"},
+                "COMP": {"gender", "number", "case"},
+                "PRTS": {"case"},  # Краткое причастие - нет падежа
+                "ADJS": {"case"},  # Краткое прилагательное - нет падежа
+            }
+
+            # Определяем целевой POS (из required_grammemes или из текущего тега)
+            target_pos = None
+            pos_set = {
+                "NOUN",
+                "VERB",
+                "ADJF",
+                "ADJS",
+                "COMP",
+                "INFN",
+                "PRTF",
+                "PRTS",
+                "GRND",
+                "NUMR",
+                "ADVB",
+                "NPRO",
+                "PRED",
+                "PREP",
+                "CONJ",
+                "PRCL",
+                "INTJ",
+            }
+            for pos_candidate in required_grammemes & pos_set:
+                target_pos = pos_candidate
+                break
+
+            for group_name, group_grammemes in grammeme_groups.items():
+                # Пропускаем группы, несовместимые с целевым POS
+                if target_pos and target_pos in pos_incompatible_groups:
+                    if group_name in pos_incompatible_groups[target_pos]:
+                        continue
+
+                # Если в required_grammemes нет граммем этой группы, берем из исходного
+                if not (required_grammemes & group_grammemes):
+                    source_grammemes_to_preserve.update(self.tag.grammemes & group_grammemes)
+
+            # Объединяем требуемые граммемы с сохраняемыми из исходного слова
+            target_grammemes = required_grammemes | source_grammemes_to_preserve
+
+            # Ищем форму с нужными граммемами
+            for suffix, tag_string, prefix in paradigm_forms:
+                pos, grammemes = self._analyzer._dawg_dict.parse_tag_string(tag_string)
+
+                # Проверяем совпадение граммем И/ИЛИ POS
+                all_tags = grammemes | {pos}
+                if target_grammemes.issubset(all_tags):
+                    # Собираем слово
+                    inflected_word = prefix + self._stem + suffix
+
+                    # Создаем новый parse
+                    new_tag = MAWOTag(pos, grammemes)
+                    return MAWOParse(
+                        word=inflected_word,
+                        normal_form=self.normal_form,
+                        tag=new_tag,
+                        score=self.score,
+                        analyzer=self._analyzer,
+                        paradigm_id=self._paradigm_id,
+                        stem=self._stem,
+                    )
+
+            # Если точное совпадение не найдено, ищем частичное
+            best_match = None
+            best_match_score = 0
+
+            for suffix, tag_string, prefix in paradigm_forms:
+                pos, grammemes = self._analyzer._dawg_dict.parse_tag_string(tag_string)
+
+                all_tags = grammemes | {pos}
+                matching_grammemes = all_tags & target_grammemes
+                match_score = len(matching_grammemes)
+
+                if match_score > best_match_score:
+                    best_match_score = match_score
+                    inflected_word = prefix + self._stem + suffix
+                    new_tag = MAWOTag(pos, grammemes)
+                    best_match = MAWOParse(
+                        word=inflected_word,
+                        normal_form=self.normal_form,
+                        tag=new_tag,
+                        score=self.score,
+                        analyzer=self._analyzer,
+                        paradigm_id=self._paradigm_id,
+                        stem=self._stem,
+                    )
+
+            return best_match
+
+        # Fallback для обычного словаря
+        if hasattr(self._analyzer, "dictionary"):
+            # Ищем формы нормальной формы слова
+            normal_parses = self._analyzer.dictionary.get(self.normal_form, [])
+
+            # Ищем форму с нужными граммемами
+            for parse_item in normal_parses:
+                if required_grammemes.issubset(parse_item.tag.grammemes):
+                    return parse_item  # type: ignore[no-any-return]
+
+            # Если точное совпадение не найдено, ищем частичное
+            for parse_item in normal_parses:
+                matching_grammemes = parse_item.tag.grammemes & required_grammemes
+                if matching_grammemes:
+                    return parse_item  # type: ignore[no-any-return]
 
         return None
+
+    @property
+    def is_known(self) -> bool:
+        """Проверить, известно ли слово словарю.
+
+        Returns:
+            True если слово найдено в словаре, False если предсказано
+        """
+        # Если у нас есть paradigm_id, значит слово из DAWG словаря
+        if self._paradigm_id is not None:
+            return True
+
+        # Проверяем через анализатор
+        if self._analyzer and hasattr(self._analyzer, "_dawg_dict") and self._analyzer._dawg_dict:
+            return self._analyzer._dawg_dict.word_is_known(self.word)
+
+        # Fallback: проверяем score (предсказанные слова имеют score < 1.0)
+        return self.score >= 1.0
+
+    @property
+    def normalized(self) -> MAWOParse:
+        """Получить разбор нормальной формы слова.
+
+        Returns:
+            MAWOParse для нормальной формы
+        """
+        if self.word == self.normal_form:
+            return self
+
+        # Парсим нормальную форму
+        if self._analyzer:
+            parses = self._analyzer.parse(self.normal_form)
+            if parses:
+                # Ищем разбор с тем же POS
+                for p in parses:
+                    if p.tag.POS == self.tag.POS:
+                        return p
+                # Если не нашли с тем же POS, возвращаем первый
+                return parses[0]
+
+        # Fallback: создаем parse для нормальной формы
+        return MAWOParse(
+            word=self.normal_form,
+            normal_form=self.normal_form,
+            tag=self.tag,
+            score=self.score,
+            analyzer=self._analyzer,
+            paradigm_id=self._paradigm_id,
+            stem=self._stem,
+        )
+
+    def make_agree_with_number(self, num: int) -> MAWOParse | None:
+        """Согласовать слово с числительным.
+
+        Args:
+            num: Число для согласования
+
+        Returns:
+            Согласованная форма или None
+        """
+        # Определяем нужное число (единственное или множественное)
+        # Правила русского языка:
+        # 1 - sing (1 дом)
+        # 2,3,4 - sing + gent (2 дома, но в некоторых случаях это особая форма)
+        # 5+ - plur + gent (5 домов)
+        # 11-14 - особый случай, всегда plur + gent
+
+        if num % 10 == 1 and num % 100 != 11:
+            # 1, 21, 31, ... - единственное число, именительный падеж
+            return self.inflect({"sing", "nomn"})
+        elif 2 <= num % 10 <= 4 and (num % 100 < 10 or num % 100 >= 20):
+            # 2,3,4, 22,23,24, ... - единственное число, родительный падеж
+            return self.inflect({"sing", "gent"})
+        else:
+            # 5-20, 25-30, ... - множественное число, родительный падеж
+            return self.inflect({"plur", "gent"})
+
+    @property
+    def methods_stack(self) -> tuple:
+        """Стек методов разбора (для совместимости с pymorphy2).
+
+        Returns:
+            Пустой кортеж (заглушка)
+        """
+        # В pymorphy2 это список методов, использованных для разбора
+        # Для нас это не критично, возвращаем пустой tuple
+        return ()
+
+    @property
+    def lexeme(self) -> list[MAWOParse]:
+        """Получить все формы слова (лексему/парадигму).
+
+        Returns:
+            Список всех словоформ данного слова
+        """
+        if not self._analyzer:
+            return [self]
+
+        # Проверяем, есть ли частица в normal_form (для слов типа "сказать-ка")
+        particle_suffix = None
+        if "-" in self.normal_form:
+            particles = ["ка", "то", "таки", "де", "тко", "тка", "с", "ста"]
+            parts = self.normal_form.rsplit("-", 1)
+            if len(parts) == 2 and parts[1] in particles:
+                particle_suffix = "-" + parts[1]
+
+        # Если используется DAWG и есть paradigm_id
+        if (
+            hasattr(self._analyzer, "_dawg_dict")
+            and self._analyzer._dawg_dict
+            and self._paradigm_id is not None
+            and self._stem is not None
+        ):
+            lexeme_forms = []
+            paradigm_forms = self._analyzer._dawg_dict.get_all_paradigm_forms(self._paradigm_id)
+
+            for suffix, tag_string, prefix in paradigm_forms:
+                pos, grammemes = self._analyzer._dawg_dict.parse_tag_string(tag_string)
+                inflected_word = prefix + self._stem + suffix
+
+                # Определяем нормальную форму (первая форма парадигмы)
+                normal_form_info = self._analyzer._dawg_dict.get_paradigm(self._paradigm_id, 0)
+                if normal_form_info:
+                    normal_suffix, _, normal_prefix = normal_form_info
+                    normal_form = normal_prefix + self._stem + normal_suffix
+                else:
+                    normal_form = inflected_word
+
+                # Добавляем частицу обратно если она была
+                if particle_suffix:
+                    inflected_word = inflected_word + particle_suffix
+                    normal_form = normal_form + particle_suffix
+
+                new_tag = MAWOTag(pos, grammemes)
+                lexeme_forms.append(
+                    MAWOParse(
+                        word=inflected_word,
+                        normal_form=normal_form,
+                        tag=new_tag,
+                        score=self.score,
+                        analyzer=self._analyzer,
+                        paradigm_id=self._paradigm_id,
+                        stem=self._stem,
+                    )
+                )
+
+            return lexeme_forms
+
+        # Fallback для обычного словаря
+        if hasattr(self._analyzer, "dictionary"):
+            normal_forms = self._analyzer.dictionary.get(self.normal_form, [])
+            return normal_forms if normal_forms else [self]
+
+        return [self]
 
     def __repr__(self) -> str:
         return f"MAWOParse(word='{self.word}', normal_form='{self.normal_form}', tag='{self.tag}', score={self.score})"
@@ -595,6 +976,139 @@ class MAWOMorphAnalyzer:
 
         word_clean = word.lower().strip()
 
+        # Пытаемся сначала с исходным словом
+        result = self._parse_word(word_clean)
+
+        # Если не найдено (UNKN, пусто или предсказание) и слово содержит 'е' или 'ё', пробуем с заменой (е/ё нормализация)
+        # Предсказанные слова имеют score < 1.0
+        is_unknown = (
+            not result
+            or (len(result) == 1 and result[0].tag.POS == "UNKN")
+            or (len(result) == 1 and result[0].score < 1.0)
+        )
+        if is_unknown and ("е" in word_clean or "ё" in word_clean):
+            # Заменяем е ↔ ё
+            word_normalized = word_clean.replace("е", "\x00").replace("ё", "е").replace("\x00", "ё")
+            result_normalized = self._parse_word(word_normalized)
+
+            # Если нашли результат и он лучше чем UNKN, используем его
+            if result_normalized and not (
+                len(result_normalized) == 1 and result_normalized[0].tag.POS == "UNKN"
+            ):
+                result = result_normalized
+                # Восстанавливаем исходное написание в word
+                for parse in result:
+                    parse.word = word_clean
+
+        # Применяем эвристику для сортировки разборов (лучшие первыми)
+        # Основано на: Turkish Morphological Disambiguation (LongestRootFirst, RootWordStatistics)
+        if result and len(result) > 1:
+            result = self._rank_parses(result)
+
+        return result if result else []
+
+    def _rank_parses(self, parses: list[MAWOParse]) -> list[MAWOParse]:
+        """Ранжировать разборы по эвристикам (лучшие первыми).
+
+        Эвристики (в порядке приоритета):
+        1. Часть речи: NOUN > VERB > ADJF > остальные (основные POS предпочтительнее)
+        2. Именительный падеж (nomn) предпочтительнее косвенных
+        3. Меньше граммем = проще форма = вероятнее
+        4. Выше score (из словаря vs предсказанные)
+
+        Args:
+            parses: Список разборов
+
+        Returns:
+            Отсортированный список разборов
+        """
+
+        def parse_rank(p: MAWOParse) -> tuple[int, int, int, float]:
+            # Приоритет 1: POS (основные части речи предпочтительнее)
+            pos_priority = {
+                "NOUN": 0,  # Существительные - высший приоритет
+                "VERB": 1,  # Глаголы
+                "INFN": 1,  # Инфинитивы
+                "ADJF": 2,  # Полные прилагательные
+                "ADJS": 3,  # Краткие прилагательные
+                "PRTF": 3,  # Причастия
+                "PRTS": 4,  # Краткие причастия
+                "GRND": 4,  # Деепричастия
+                "NUMR": 2,  # Числительные
+                "ADVB": 3,  # Наречия
+                "NPRO": 2,  # Местоимения-существительные
+                "PRED": 4,  # Предикативы
+            }
+            pos_rank = pos_priority.get(p.tag.POS, 10)  # Остальные - низкий приоритет
+
+            # Приоритет 2: nominative case (меньше = лучше)
+            nomn_penalty = 0 if "nomn" in p.tag.grammemes else 1
+
+            # Приоритет 3: меньше граммем (меньше = лучше)
+            grammemes_count = len(p.tag.grammemes)
+
+            # Приоритет 4: score (больше = лучше, поэтому инвертируем)
+            score_rank = -p.score
+
+            return (pos_rank, nomn_penalty, grammemes_count, score_rank)
+
+        return sorted(parses, key=parse_rank)
+
+    def tag(self, word: str) -> list[MAWOTag]:
+        """Получить список возможных тегов для слова.
+
+        Args:
+            word: Слово для анализа
+
+        Returns:
+            Список возможных тегов (MAWOTag)
+        """
+        parses = self.parse(word)
+        return [p.tag for p in parses]
+
+    def _parse_word(self, word_clean: str) -> list[MAWOParse]:
+        """Внутренний метод парсинга слова без е/ё нормализации."""
+
+        # Сначала пробуем стандартный парсинг
+        result = self._parse_word_base(word_clean)
+
+        # Если получили хороший результат (не UNKN и не предсказание), возвращаем его
+        # Предсказания имеют score < 1.0
+        if result and result[0].tag.POS != "UNKN" and result[0].score >= 1.0:
+            return result
+
+        # HyphenSeparatedParticleAnalyzer: обработка слов с частицами после дефиса
+        # Только если стандартный парсинг дал UNKN или предсказание
+        if "-" in word_clean:
+            particles = ["-ка", "-то", "-таки", "-де", "-тко", "-тка", "-с", "-ста"]
+            for particle in particles:
+                if word_clean.endswith(particle):
+                    # Парсим слово без частицы
+                    word_without_particle = word_clean[: -len(particle)]
+                    if word_without_particle:
+                        parses = self._parse_word_base(word_without_particle)
+                        if parses and parses[0].tag.POS != "UNKN":
+                            # Добавляем частицу обратно
+                            particle_result = []
+                            for p in parses:
+                                new_parse = MAWOParse(
+                                    word=word_clean,  # с частицей
+                                    normal_form=p.normal_form + particle,
+                                    tag=p.tag,
+                                    score=p.score * 0.9,  # score_multiplier
+                                    analyzer=self,
+                                    paradigm_id=p._paradigm_id,
+                                    stem=p._stem,
+                                )
+                                particle_result.append(new_parse)
+                            return particle_result
+                    break  # Только одна частица может быть
+
+        # Возвращаем результат стандартного парсинга (может быть UNKN)
+        return result if result else []
+
+    def _parse_word_base(self, word_clean: str) -> list[MAWOParse]:
+        """Базовый парсинг слова без обработки частиц."""
         # Если используем DAWG через DAWGDictionary
         if self.use_dawg and self._dawg_dict:
             try:
@@ -639,6 +1153,8 @@ class MAWOMorphAnalyzer:
                         tag=mawo_tag,
                         score=1.0,
                         analyzer=self,
+                        paradigm_id=paradigm_id,
+                        stem=stem if normal_form_info else None,
                     )
                     mawo_parses.append(mawo_parse)
 
@@ -657,8 +1173,109 @@ class MAWOMorphAnalyzer:
                 parse._analyzer = self
             return parses
 
+        # Если не найдено, пробуем предсказание по суффиксам (KnownSuffixAnalyzer)
+        if self.use_dawg and self._dawg_dict:
+            predicted = self._predict_by_suffix(word_clean)
+            if predicted:
+                return predicted
+
         # Если не найдено, используем паттерны
         return self._analyze_by_patterns(word_clean)
+
+    def _predict_by_suffix(self, word: str) -> list[MAWOParse]:
+        """Предсказание форм слова по известным суффиксам (упрощённый KnownSuffixAnalyzer)."""
+        if len(word) < 4:
+            return []
+
+        results = []
+
+        # Пробуем разные длины суффиксов (от 4 до 2 символов)
+        for suffix_len in [4, 3, 2]:
+            if len(word) <= suffix_len:
+                continue
+
+            suffix = word[-suffix_len:]
+
+            # Ищем слова с таким же суффиксом в DAWG
+            similar_words = []
+            try:
+                # Простой поиск: проверяем несколько вариантов
+                for test_stem in [
+                    "к",
+                    "м",
+                    "п",
+                    "т",
+                    "л",
+                    "н",
+                    "р",
+                    "с",
+                    "в",
+                    "д",
+                    "б",
+                    "г",
+                    "з",
+                    "ж",
+                    "х",
+                ]:
+                    test_word = test_stem + suffix
+                    word_parses = self._dawg_dict.get_word_parses(test_word)
+                    if word_parses:
+                        similar_words.append((test_word, word_parses[0]))
+                        if len(similar_words) >= 3:
+                            break
+            except Exception:
+                pass
+
+            # Если нашли похожие слова, используем их парадигму
+            if similar_words:
+                # Берём первое похожее слово
+                similar_word, (paradigm_id, word_idx) = similar_words[0]
+
+                # Определяем stem нового слова
+                # Нужно вычесть суффикс из похожего слова и заменить на наш stem
+                paradigm_info = self._dawg_dict.get_paradigm(paradigm_id, word_idx)
+                if paradigm_info:
+                    suffix_old, tag_string, prefix = paradigm_info
+
+                    # Вычисляем stem похожего слова
+                    similar_stem = similar_word
+                    if prefix and similar_stem.startswith(prefix):
+                        similar_stem = similar_stem[len(prefix) :]
+                    if suffix_old and similar_stem.endswith(suffix_old):
+                        similar_stem = similar_stem[: -len(suffix_old)]
+
+                    # Наш stem = наше слово минус суффикс минус префикс
+                    our_stem = word
+                    if prefix and our_stem.startswith(prefix):
+                        our_stem = our_stem[len(prefix) :]
+                    if suffix_old and our_stem.endswith(suffix_old):
+                        our_stem = our_stem[: -len(suffix_old)]
+
+                    # Получаем тег
+                    pos, grammemes = self._dawg_dict.parse_tag_string(tag_string)
+
+                    # Получаем нормальную форму
+                    normal_form_info = self._dawg_dict.get_paradigm(paradigm_id, 0)
+                    if normal_form_info:
+                        normal_suffix, _, normal_prefix = normal_form_info
+                        normal_form = normal_prefix + our_stem + normal_suffix
+                    else:
+                        normal_form = word
+
+                    mawo_tag = MAWOTag(pos, grammemes)
+                    mawo_parse = MAWOParse(
+                        word=word,
+                        normal_form=normal_form,
+                        tag=mawo_tag,
+                        score=0.5,  # Пониженный score для предсказанных
+                        analyzer=self,
+                        paradigm_id=paradigm_id,
+                        stem=our_stem,
+                    )
+                    results.append(mawo_parse)
+                    return results  # Возвращаем первый результат
+
+        return results
 
     def _analyze_by_patterns(self, word: str) -> list[MAWOParse]:
         """Анализ слова по морфологическим паттернам."""
